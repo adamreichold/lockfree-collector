@@ -47,10 +47,11 @@ use alloc::boxed::Box;
 /// Dropping the collector will leak any uncollected values.
 pub struct Collector<T, const B: usize>(AtomicPtr<Block<T, B>>);
 
+#[repr(C)]
 struct Block<T, const B: usize> {
-    vals: [MaybeUninit<T>; B],
-    cnt: NonZeroUsize,
     next: *mut Self,
+    cnt: NonZeroUsize,
+    vals: [MaybeUninit<T>; B],
 }
 
 impl<T, const B: usize> Collector<T, B> {
@@ -103,9 +104,9 @@ where
         let cnt = NonZeroUsize::new(1).unwrap();
 
         let block = Block {
-            vals,
-            cnt,
             next: old_top,
+            cnt,
+            vals,
         };
 
         let top = Box::into_raw(Box::new(block));

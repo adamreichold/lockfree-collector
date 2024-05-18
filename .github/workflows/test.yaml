@@ -1,0 +1,16 @@
+on: [push]
+
+jobs:
+  test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+    - uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: miri, rust-src
+    - run: cargo test
+    - run: cargo miri test

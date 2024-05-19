@@ -41,7 +41,11 @@ extern crate alloc;
 use core::mem::{replace, MaybeUninit};
 use core::num::NonZeroUsize;
 use core::ptr::null_mut;
+
+#[cfg(target_has_atomic = "ptr")]
 use core::sync::atomic::{AtomicPtr, Ordering};
+#[cfg(not(target_has_atomic = "ptr"))]
+use portable_atomic::{AtomicPtr, Ordering};
 
 use alloc::boxed::Box;
 

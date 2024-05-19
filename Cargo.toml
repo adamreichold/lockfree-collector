@@ -8,3 +8,6 @@ authors = ["Adam Reichold <adam.reichold@t-online.de>"]
 license = "MIT OR Apache-2.0"
 documentation = "https://docs.rs/lockfree-collector"
 repository = "https://github.com/adamreichold/lockfree-collector"
+
+[target.'cfg(not(target_has_atomic = "ptr"))'.dependencies]
+portable-atomic = "1.0"

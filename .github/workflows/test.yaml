@@ -14,3 +14,6 @@ jobs:
         components: miri, rust-src
     - run: cargo test
     - run: cargo miri test
+    - run: cargo test --release
+      env:
+        RUSTFLAGS: --cfg loom

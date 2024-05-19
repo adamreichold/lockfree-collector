@@ -42,12 +42,40 @@ use core::mem::{replace, MaybeUninit};
 use core::num::NonZeroUsize;
 use core::ptr::null_mut;
 
-#[cfg(target_has_atomic = "ptr")]
+#[cfg(all(target_has_atomic = "ptr", not(loom)))]
 use core::sync::atomic::{AtomicPtr, Ordering};
-#[cfg(not(target_has_atomic = "ptr"))]
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicPtr, Ordering};
+#[cfg(all(not(target_has_atomic = "ptr"), not(loom)))]
 use portable_atomic::{AtomicPtr, Ordering};
 
 use alloc::boxed::Box;
+
+#[cfg(not(loom))]
+macro_rules! const_fn {
+    {
+        $( #[ $attr:meta ] )*
+        $vis:vis fn $name:ident ( $( $args:tt )* ) $( -> $res:tt )?
+        $body:block
+    } => {
+        $( #[ $attr ] )*
+        $vis const fn $name ( $( $args )* ) $( -> $res )?
+        $body
+    };
+}
+
+#[cfg(loom)]
+macro_rules! const_fn {
+    {
+        $( #[ $attr:meta ] )*
+        $vis:vis fn $name:ident ( $( $args:tt )* ) $( -> $res:tt )?
+        $body:block
+    } => {
+        $( #[ $attr ] )*
+        $vis fn $name ( $( $args )* ) $( -> $res )?
+        $body
+    };
+}
 
 /// A lock-free blocked stealing collector
 ///
@@ -62,11 +90,13 @@ struct Block<T, const B: usize> {
 }
 
 impl<T, const B: usize> Collector<T, B> {
-    /// Create an empty collector without allocating any blocks
-    pub const fn new() -> Self {
-        assert!(B != 0, "Block size must not be zero");
+    const_fn! {
+        /// Create an empty collector without allocating any blocks
+        pub fn new() -> Self {
+            assert!(B != 0, "Block size must not be zero");
 
-        Self(AtomicPtr::new(null_mut()))
+            Self(AtomicPtr::new(null_mut()))
+        }
     }
 }
 
@@ -210,8 +240,15 @@ unsafe impl<T, const B: usize> Send for Iter<T, B> where T: Send {}
 mod tests {
     use super::*;
 
+    #[cfg(loom)]
+    use std::sync::Arc;
+    #[cfg(not(loom))]
     use std::thread::scope;
 
+    #[cfg(loom)]
+    use loom::{model, thread::spawn, MAX_THREADS};
+
+    #[cfg(not(loom))]
     #[test]
     fn it_works_single_thread() {
         let collector = Collector::<String, 30>::new();
@@ -229,6 +266,7 @@ mod tests {
         assert_eq!(sum, 99 * 100 / 2);
     }
 
+    #[cfg(not(loom))]
     #[test]
     fn it_works_multiple_threads() {
         let collector = Collector::<String, 30>::new();
@@ -250,5 +288,37 @@ mod tests {
             .unwrap();
 
         assert_eq!(sum, 30 * 9 * 10 / 2);
+    }
+
+    #[cfg(loom)]
+    #[test]
+    fn it_works_multiple_threads() {
+        model(|| {
+            let collector = Arc::new(Collector::<String, 30>::new());
+
+            let threads = (0..MAX_THREADS - 1)
+                .map(|_| {
+                    let collector = Arc::clone(&collector);
+
+                    spawn(move || {
+                        for num in 0..10 {
+                            collector.push(num.to_string());
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            for thread in threads {
+                thread.join().unwrap();
+            }
+
+            let sum = collector
+                .collect()
+                .map(|txt| txt.parse::<usize>())
+                .sum::<Result<usize, _>>()
+                .unwrap();
+
+            assert_eq!(sum, (MAX_THREADS - 1) * 9 * 10 / 2);
+        });
     }
 }

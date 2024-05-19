@@ -11,3 +11,6 @@ repository = "https://github.com/adamreichold/lockfree-collector"
 
 [target.'cfg(not(target_has_atomic = "ptr"))'.dependencies]
 portable-atomic = "1.0"
+
+[target.'cfg(loom)'.dependencies]
+loom = "0.7"

@@ -30,7 +30,7 @@
 //! #
 //! # Ok::<_, Box<dyn std::error::Error>>(())
 //! ```
-#![deny(missing_docs)]
+#![deny(missing_docs, clippy::undocumented_unsafe_blocks)]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
@@ -57,6 +57,8 @@ struct Block<T, const B: usize> {
 impl<T, const B: usize> Collector<T, B> {
     /// Create an empty collector without allocating any blocks
     pub const fn new() -> Self {
+        assert!(B != 0, "Block size must not be zero");
+
         Self(AtomicPtr::new(null_mut()))
     }
 }
@@ -116,10 +118,11 @@ where
 
     fn update(&self, new_top: *mut Block<T, B>) {
         // SAFETY: We just allocated `new_top` and have not yet published it
-        // or we have ownership of the whole chain starting at `new_top`.
+        // or we have obtained ownership by atomically swapping it out of `self.0`.
         let mut last_next = unsafe { &mut (*new_top).next };
 
         while !last_next.is_null() {
+            // SAFETY: We have ownership of the whole chain starting at `new_top`.
             last_next = unsafe { &mut (**last_next).next };
         }
 
@@ -193,6 +196,7 @@ impl<T, const B: usize> Drop for Iter<T, B> {
     }
 }
 
+// SAFETY: `Iter` owns the collected values and is therefore `Send` if they are.
 unsafe impl<T, const B: usize> Send for Iter<T, B> where T: Send {}
 
 #[cfg(test)]

@@ -4,12 +4,15 @@
 //! i.e. the `collect` method steals all values using a single atomic operation
 //! and it stores blocks of `B` values to amortize the cost of heap allocations.
 //!
+//! When choosing a block size `B`, consider that each block currently contains
+//! two additional pointer-sized fields.
+//!
 //! ```
 //! use std::thread;
 //!
 //! use lockfree_collector::Collector;
 //!
-//! let collector = Collector::<String, 32>::new();
+//! let collector = Collector::<String, 30>::new();
 //!
 //! thread::scope(|scope| {
 //!     for _ in 0..30 {
@@ -47,7 +50,7 @@ use alloc::boxed::Box;
 /// Dropping the collector will leak any uncollected values.
 pub struct Collector<T, const B: usize>(AtomicPtr<Block<T, B>>);
 
-#[repr(C)]
+#[repr(C, align(64))]
 struct Block<T, const B: usize> {
     next: *mut Self,
     cnt: NonZeroUsize,
@@ -207,7 +210,7 @@ mod tests {
 
     #[test]
     fn it_works_single_thread() {
-        let collector = Collector::<String, 32>::new();
+        let collector = Collector::<String, 30>::new();
 
         for num in 0..100 {
             collector.push(num.to_string());
@@ -224,7 +227,7 @@ mod tests {
 
     #[test]
     fn it_works_multiple_threads() {
-        let collector = Collector::<String, 32>::new();
+        let collector = Collector::<String, 30>::new();
 
         scope(|scope| {
             for _ in 0..30 {

@@ -36,7 +36,6 @@
 extern crate alloc;
 
 use core::mem::MaybeUninit;
-use core::num::NonZeroUsize;
 use core::ptr::null_mut;
 
 #[cfg(target_has_atomic = "ptr")]
@@ -54,7 +53,7 @@ pub struct Collector<T, const B: usize>(AtomicPtr<Block<T, B>>);
 #[repr(C, align(64))]
 struct Block<T, const B: usize> {
     next: *mut Self,
-    cnt: NonZeroUsize,
+    cnt: usize,
     vals: [MaybeUninit<T>; B],
 }
 
@@ -87,10 +86,10 @@ where
             // SAFETY: We have ownership of the whole chain starting at `old_top`.
             let block = unsafe { &mut *curr };
 
-            if block.cnt.get() < B {
-                block.vals[block.cnt.get()].write(val);
+            if block.cnt < B {
+                block.vals[block.cnt].write(val);
 
-                block.cnt = NonZeroUsize::new(block.cnt.get() + 1).unwrap();
+                block.cnt += 1;
 
                 self.update(old_top);
                 return;
@@ -107,17 +106,47 @@ where
 
         vals[0].write(val);
 
-        let cnt = NonZeroUsize::new(1).unwrap();
-
         let block = Block {
             next: old_top,
-            cnt,
+            cnt: 1,
             vals,
         };
 
         let top = Box::into_raw(Box::new(block));
 
         self.update(top);
+    }
+
+    /// Collect the values into an iterator
+    ///
+    /// Dropping the iterator will drop the remaining collected values.
+    pub fn collect<F>(&self, mut f: F)
+    where
+        F: FnMut(T),
+    {
+        let old_top = self.0.swap(null_mut(), Ordering::AcqRel);
+
+        if old_top.is_null() {
+            return;
+        }
+
+        let mut curr = old_top;
+
+        while !curr.is_null() {
+            // SAFETY: We have ownership of the whole chain starting at `old_top`.
+            let block = unsafe { &mut *curr };
+
+            for val in &block.vals[..block.cnt] {
+                // SAFETY: All values up to `cnt` have been initialized.
+                f(unsafe { val.assume_init_read() });
+            }
+
+            block.cnt = 0;
+
+            curr = block.next;
+        }
+
+        self.update(old_top);
     }
 
     fn update(&self, new_top: *mut Block<T, B>) {
@@ -144,30 +173,6 @@ where
                 Ok(_) => break,
                 Err(top) => old_top = top,
             }
-        }
-    }
-
-    /// Collect the values into an iterator
-    ///
-    /// Dropping the iterator will drop the remaining collected values.
-    pub fn collect<F>(&self, mut f: F)
-    where
-        F: FnMut(T),
-    {
-        let old_top = self.0.swap(null_mut(), Ordering::AcqRel);
-
-        let mut curr = old_top;
-
-        while !curr.is_null() {
-            // SAFETY: We have ownership of the whole chain starting at `old_top`.
-            let block = unsafe { Box::from_raw(curr) };
-
-            for val in &block.vals[..block.cnt.get()] {
-                // SAFETY: All values up to `cnt` have been initialized.
-                f(unsafe { val.assume_init_read() });
-            }
-
-            curr = block.next;
         }
     }
 }

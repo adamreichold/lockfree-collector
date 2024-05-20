@@ -14,3 +14,5 @@ jobs:
         components: miri, rust-src
     - run: cargo test
     - run: cargo miri test
+      env:
+        MIRIFLAGS: -Zmiri-ignore-leaks

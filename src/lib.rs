@@ -251,4 +251,35 @@ mod tests {
 
         assert_eq!(sum, 30 * 9 * 10 / 2);
     }
+
+    #[test]
+    fn collect_incrementally() {
+        let collector = Collector::<String, 30>::new();
+
+        let mut sum = 0;
+
+        scope(|scope| {
+            for _ in 0..30 {
+                scope.spawn(|| {
+                    for num in 0..100 {
+                        collector.push(num.to_string());
+                    }
+                });
+            }
+
+            sum += collector
+                .collect()
+                .map(|txt| txt.parse::<i32>())
+                .sum::<Result<i32, _>>()
+                .unwrap();
+        });
+
+        sum += collector
+            .collect()
+            .map(|txt| txt.parse::<i32>())
+            .sum::<Result<i32, _>>()
+            .unwrap();
+
+        assert_eq!(sum, 30 * 99 * 100 / 2);
+    }
 }

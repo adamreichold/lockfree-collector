@@ -24,21 +24,18 @@
 //!     }
 //! });
 //!
-//! let sum = collector
-//!     .collect()
-//!     .map(|txt| txt.parse::<i32>())
-//!     .sum::<Result<i32, _>>()?;
+//! let mut cnt = 0;
 //!
-//! assert_eq!(sum, 30 * 9 * 10 / 2);
-//! #
-//! # Ok::<_, Box<dyn std::error::Error>>(())
+//! collector.collect(|txt| cnt += txt.parse::<i32>().is_ok() as usize);
+//!
+//! assert_eq!(cnt, 30 * 10);
 //! ```
 #![deny(missing_docs, clippy::undocumented_unsafe_blocks)]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
 
-use core::mem::{replace, MaybeUninit};
+use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
 use core::ptr::null_mut;
 
@@ -153,58 +150,27 @@ where
     /// Collect the values into an iterator
     ///
     /// Dropping the iterator will drop the remaining collected values.
-    pub fn collect(&self) -> Iter<T, B> {
+    pub fn collect<F>(&self, mut f: F)
+    where
+        F: FnMut(T),
+    {
         let old_top = self.0.swap(null_mut(), Ordering::AcqRel);
 
-        Iter {
-            curr: old_top,
-            idx: 0,
-        }
-    }
-}
+        let mut curr = old_top;
 
-/// An iterator owning the collected values
-pub struct Iter<T, const B: usize> {
-    curr: *mut Block<T, B>,
-    idx: usize,
-}
-
-impl<T, const B: usize> Iterator for Iter<T, B> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
+        while !curr.is_null() {
             // SAFETY: We have ownership of the whole chain starting at `old_top`.
-            let block = unsafe { self.curr.as_ref()? };
+            let block = unsafe { Box::from_raw(curr) };
 
-            if self.idx < block.cnt.get() {
-                // SAFETY: All values up to `cnt` have been initialized
-                // and `self.idx` will only reset with the next block.
-                let val = unsafe { block.vals[self.idx].assume_init_read() };
-
-                self.idx += 1;
-
-                return Some(val);
+            for val in &block.vals[..block.cnt.get()] {
+                // SAFETY: All values up to `cnt` have been initialized.
+                f(unsafe { val.assume_init_read() });
             }
 
-            let old_curr = replace(&mut self.curr, block.next);
-            self.idx = 0;
-
-            // SAFETY: We have ownership of the whole chain starting at `old_top`
-            // and we overwrote `self.curr` by `block.next`.
-            let _ = unsafe { Box::from_raw(old_curr) };
+            curr = block.next;
         }
     }
 }
-
-impl<T, const B: usize> Drop for Iter<T, B> {
-    fn drop(&mut self) {
-        self.for_each(|_| ());
-    }
-}
-
-// SAFETY: `Iter` owns the collected values and is therefore `Send` if they are.
-unsafe impl<T, const B: usize> Send for Iter<T, B> where T: Send {}
 
 #[cfg(test)]
 mod tests {
@@ -220,11 +186,9 @@ mod tests {
             collector.push(num.to_string());
         }
 
-        let sum = collector
-            .collect()
-            .map(|txt| txt.parse::<i32>())
-            .sum::<Result<i32, _>>()
-            .unwrap();
+        let mut sum = 0;
+
+        collector.collect(|txt| sum += txt.parse::<i32>().unwrap());
 
         assert_eq!(sum, 99 * 100 / 2);
     }
@@ -243,11 +207,9 @@ mod tests {
             }
         });
 
-        let sum = collector
-            .collect()
-            .map(|txt| txt.parse::<i32>())
-            .sum::<Result<i32, _>>()
-            .unwrap();
+        let mut sum = 0;
+
+        collector.collect(|txt| sum += txt.parse::<i32>().unwrap());
 
         assert_eq!(sum, 30 * 9 * 10 / 2);
     }
@@ -267,18 +229,10 @@ mod tests {
                 });
             }
 
-            sum += collector
-                .collect()
-                .map(|txt| txt.parse::<i32>())
-                .sum::<Result<i32, _>>()
-                .unwrap();
+            collector.collect(|txt| sum += txt.parse::<i32>().unwrap());
         });
 
-        sum += collector
-            .collect()
-            .map(|txt| txt.parse::<i32>())
-            .sum::<Result<i32, _>>()
-            .unwrap();
+        collector.collect(|txt| sum += txt.parse::<i32>().unwrap());
 
         assert_eq!(sum, 30 * 99 * 100 / 2);
     }

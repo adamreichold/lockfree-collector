@@ -120,16 +120,22 @@ where
     /// Collect the values into an iterator
     ///
     /// Dropping the iterator will drop the remaining collected values.
-    pub fn collect<F>(&self, mut f: F)
+    #[inline]
+    pub fn collect<F>(&self, f: F)
     where
         F: FnMut(T),
     {
         let old_top = self.0.swap(null_mut(), Ordering::AcqRel);
 
-        if old_top.is_null() {
-            return;
+        if !old_top.is_null() {
+            self.collect_nonnull(old_top, f);
         }
+    }
 
+    fn collect_nonnull<F>(&self, old_top: *mut Block<T, B>, mut f: F)
+    where
+        F: FnMut(T),
+    {
         let mut curr = old_top;
 
         while !curr.is_null() {
